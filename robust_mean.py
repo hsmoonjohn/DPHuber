@@ -434,7 +434,7 @@ class huberReg():
         if dim == 'high':
             return c*c*np.std(self.Y, ddof=1)*((self.n/(np.log(self.n)*np.log(self.d)))**1/2)
         
-    def huber_loss_score_function(x, tau):
+    def huber_loss_score_function(self, x, tau):
     
         # Calculate the score function
         score = np.where(np.abs(x) <= tau, x, tau * np.sign(x))
@@ -720,10 +720,7 @@ class huberReg():
 
         return beta1, [res, tau, count], beta_seq
 
-
         
-
-
     def noisy_trun_mean(self, mu0=np.array([]), epsilon = 0.5,R = None, delta = None):
 
         if R == None:
