@@ -433,7 +433,7 @@ class huberReg():
         return score
 
 
-    def ada_huber_reg_lowdim(self, beta0, maxit, eta, epsilon=10**(-3), tau=None):
+    def ada_huber_reg_lowdim(self, beta0, maxit, eta, epsilon=10**(-4), tau=None):
 
         if beta0 is None:
             beta0 = np.zeros(self.d)
@@ -447,11 +447,12 @@ class huberReg():
             count = 0
 
             while count < maxit and l2>epsilon:
-                grad1 = -eta*self.X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(np.sum(self.X**2, axis=1)**0.5))/self.n
+                grad1 = -self.X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(np.sum(self.X**2, axis=1)**0.5))/self.n
+                l2 = np.sqrt(np.sum(grad1 ** 2))
                 beta0 = beta1
-                beta1 += -grad1
+                beta1 += -eta*grad1
                 res = self.Y-self.X.dot(beta1)
-                l2 = np.sqrt(np.sum((beta1 - beta0) ** 2))
+                
                 #beta_seq[:, count+1] = beta1
                 count += 1
             
@@ -462,12 +463,11 @@ class huberReg():
             count = 0
 
             while count < maxit and l2>epsilon:
-                grad1 = eta*self.X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(np.sum(self.X**2, axis=1)**0.5))/self.n
-                diff = grad1 
+                grad1 = self.X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(np.sum(self.X**2, axis=1)**0.5))/self.n
+                l2 = np.sqrt(np.sum(grad1 ** 2))
                 beta0 = beta1
-                beta1 += diff
+                beta1 += -eta*grad1
                 res = self.Y-self.X.dot(beta1)
-                l2 = np.sqrt(np.sum((beta1 - beta0) ** 2))
                 #beta_seq[:, count+1] = beta1
                 count += 1
 
@@ -477,11 +477,11 @@ class huberReg():
 
     def noisy_huber_reg_lowdim(self, beta0, epsilon, T, delta, eta, gamma=1, tau=None):
 
-        if not beta0.any():
+        if beta0 is None:
             beta0 = np.zeros(self.d)
 
         if T == None:
-            T = T = int((eta**(-2))*(np.log(self.n)))
+            T = int((np.log(self.n)))
 
         beta_seq = np.zeros([self.d, T+1])
         beta_seq[:,0] = beta0
@@ -494,9 +494,54 @@ class huberReg():
             count = 0
 
             while count < T:
+                grad1 = self.X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(np.sum(self.X**2, axis=1)**0.5))/self.n
+                noise = rgt.multivariate_normal(np.zeros(self.d), np.identity(self.d))
+                diff = eta*grad1 + 2*eta*T*np.sqrt(2*np.log(2*T/delta))*gamma*tau*noise/(epsilon*self.n)
+                beta1 += diff
+                res = self.Y-self.X.dot(beta1)
+                beta_seq[:, count+1] = beta1
+                count += 1
+            
+        else:
+            beta1 = beta0
+            res = self.Y-self.X.dot(beta1)
+            count = 0
+
+            while count < T:
                 grad1 = eta*self.X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(np.sum(self.X**2, axis=1)**0.5))/self.n
-                #noise = rgt.multivariate_normal(np.zeros(self.d), np.identity(self.d))
-                diff = grad1 #+ 2*eta*T*np.sqrt(2*np.log(2*T/delta))*gamma*tau*noise/(10*epsilon*self.n)
+                noise = rgt.multivariate_normal(np.zeros(self.d), np.identity(self.d))
+                diff = grad1 + 2*eta*T*np.sqrt(2*np.log(2*T/delta))*gamma*tau*noise/(epsilon*self.n)
+                beta1 += diff
+                res = self.Y-self.X.dot(beta1)
+                beta_seq[:, count+1] = beta1
+                count += 1
+
+
+        return beta1, [res, tau, count], beta_seq
+    
+
+    def noisy_huber_reg_highdim(self, beta0, epsilon, T, delta, eta, gamma=1, tau=None):
+
+        if beta0 is None:
+            beta0 = np.zeros(self.d)
+
+        if T == None:
+            T = int((np.log(self.n)))
+
+        beta_seq = np.zeros([self.d, T+1])
+        beta_seq[:,0] = beta0
+
+        if tau == None:
+            
+            tau = self.robust_tau(dim='low')
+            beta1 = beta0
+            res = self.Y-self.X.dot(beta1)
+            count = 0
+
+            while count < T:
+                grad1 = self.X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(np.max(np.abs(X), axis=1)))/self.n
+                noise = rgt.multivariate_normal(np.zeros(self.d), np.identity(self.d))
+                diff = eta*grad1 + 2*eta*T*np.sqrt(2*np.log(2*T/delta))*gamma*tau*noise/(epsilon*self.n)
                 beta1 += diff
                 res = self.Y-self.X.dot(beta1)
                 beta_seq[:, count+1] = beta1
@@ -520,49 +565,3 @@ class huberReg():
         return beta1, [res, tau, count], beta_seq
 
         
-    def noisy_trun_mean(self, mu0=np.array([]), epsilon = 0.5,R = None, delta = None):
-
-        if R == None:
-            R = np.amax(np.absolute(self.X))
-
-        if delta == None :
-            delta = 1/2
-
-        Y = np.where(self.X > R, R, self.X)
-        Y = np.where(Y < -R, -R, Y)
-
-        if not mu0.any():
-            mu0 = np.mean(Y, axis = 0)
-
-        noise = rgt.multivariate_normal(np.zeros(self.d), np.identity(self.d))
-        mu = mu0 + noise*2*R*((self.d*np.log(1/delta))**0.5)/(self.n*epsilon)
-        return mu
-
-
-    def gd_mean(self, tau=None, method="Huber", mu0=np.array([]), lr=1, max_iter=500, tol=1e-10):
-
-        if tau==None: tau = self.tau
-
-        if method not in self.methods:
-            raise ValueError("method must be either Catoni or Huber")
-
-        if not mu0.any():
-            mu0 = np.mean(self.X, axis=0)
-
-        mu_seq = np.zeros([self.d, max_iter+1])
-        mu_seq[:,0] = mu0
-
-        res = mu0 - self.X
-        weight = self.robust_weight(np.sum(res**2, axis=1)**0.5/tau, method)
-
-        r0, count = 1, 0
-        while r0 > tol and count <= max_iter:
-            grad = res.T.dot(weight)/self.n
-            mu0 -= lr*grad
-            mu_seq[:, count+1] = mu0
-            r0, res = np.max(abs(grad)), mu0 - self.X
-            weight = self.robust_weight(np.sum(res**2, axis=1)**0.5/tau, method)
-            tau = self.tau * self.trun_cov(res, weight)[0]**0.5
-            count += 1
-
-        return mu0, [res, weight, tau, count], mu_seq[:,:count+1]
