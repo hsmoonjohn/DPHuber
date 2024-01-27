@@ -539,7 +539,7 @@ class huberReg():
             count = 0
 
             while count < T:
-                grad1 = self.X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(np.max(np.abs(X), axis=1)))/self.n
+                grad1 = self.X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(np.max(np.abs(self.X), axis=1)))/self.n
                 noise = rgt.multivariate_normal(np.zeros(self.d), np.identity(self.d))
                 diff = eta*grad1 + 2*eta*T*np.sqrt(2*np.log(2*T/delta))*gamma*tau*noise/(epsilon*self.n)
                 beta1 += diff
