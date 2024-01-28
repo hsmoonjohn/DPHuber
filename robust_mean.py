@@ -359,7 +359,7 @@ class m_est():
 class huberReg():
     
 
-    def __init__(self, X, Y):
+    def __init__(self, X, Y, intercept=True):
         '''
         Argumemnts
             X: n by d numpy array. n is the number of observations.
@@ -368,7 +368,14 @@ class huberReg():
             Y: n response variable
         '''
         self.n, self.d = X.shape
-        self.X = X
+
+        self.mX, self.sdX = np.mean(X, axis=0), np.std(X, axis=0)
+        self.itcp = intercept
+        if intercept:
+            self.X = np.concatenate([np.ones((self.n,1)), X], axis=1)
+            self.X1 = np.concatenate([np.ones((self.n,1)), (X - self.mX)/self.sdX], axis=1)
+        else:
+            self.X, self.X1 = X, X/self.sdX
         self.Y = Y
         self.tau = (self.n/np.log(self.n))**0.5
 
@@ -432,6 +439,37 @@ class huberReg():
         score = np.where(np.abs(x) <= tau, x, tau * np.sign(x))
         return score
 
+    def f1(self, x, resSq, n, rhs):
+        """
+        Function to be zeroed.
+        x: Candidate value for tau.
+        resSq: Squared residuals.
+        n: Number of observations.
+        rhs: Right-hand side value, a predetermined constant.
+        """
+        return np.mean(np.minimum(resSq / x, np.ones(n))) - rhs
+
+    def rootf1(self, resSq, n, rhs, low, up, tol=0.001, maxIte=500):
+        """
+        Bisection method to find the root of f1.
+        resSq: Squared residuals.
+        n: Number of observations.
+        rhs: Right-hand side value.
+        low, up: Initial lower and upper bounds for the root.
+        tol: Tolerance for the root's accuracy.
+        maxIte: Maximum number of iterations.
+        """
+        ite = 1
+        while ite <= maxIte and up - low > tol:
+            mid = 0.5 * (low + up)
+            val = self.f1(mid, resSq, n, rhs)
+            if val < 0:
+                up = mid
+            else:
+                low = mid
+            ite += 1
+
+        return 0.5 * (low + up)
 
     def ada_huber_reg_lowdim(self, beta0, maxit, eta, epsilon=10**(-4), tau=None):
 
@@ -475,50 +513,119 @@ class huberReg():
         return beta1, [res, tau, count]
 
 
-    def noisy_huber_reg_lowdim(self, beta0, epsilon, T, delta, eta, gamma=1, tau=None):
+    def noisy_huber_reg_lowdim(self, epsilon, T, delta, eta, beta0 = None, gamma=1, tau=None, 
+                               standardize=True, adjust=True):
 
         if beta0 is None:
-            beta0 = np.zeros(self.d)
+            beta0 = np.zeros(self.d+int(self.itcp))
 
-        if T == None:
+        if T is None:
             T = int((np.log(self.n)))
-
-        beta_seq = np.zeros([self.d, T+1])
+        if standardize: X = self.X1
+        else: X= self.X
+        beta_seq = np.zeros([X.shape[1], T+1])
         beta_seq[:,0] = beta0
 
         if tau == None:
             
-            tau = self.robust_tau(dim='low')
+            tau = 1.345*np.median(np.abs(self.Y-np.median(self.Y)))
+            #tau = self.robust_tau()
             beta1 = beta0
-            res = self.Y-self.X.dot(beta1)
+            res = self.Y-X.dot(beta1)
             count = 0
+            rownorm = np.sum(X**2, axis=1)**0.5
 
             while count < T:
-                grad1 = self.X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(np.sum(self.X**2, axis=1)**0.5))/self.n
-                noise = rgt.multivariate_normal(np.zeros(self.d), np.identity(self.d))
+                grad1 = X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(rownorm))/self.n
+                noise = rgt.multivariate_normal(np.zeros(X.shape[1]), np.identity(X.shape[1]))
                 diff = eta*grad1 + 2*eta*T*np.sqrt(2*np.log(2*T/delta))*gamma*tau*noise/(epsilon*self.n)
                 beta1 += diff
-                res = self.Y-self.X.dot(beta1)
-                beta_seq[:, count+1] = beta1
+                res = self.Y-X.dot(beta1)
+                beta_seq[:, count+1] = np.copy(beta1)
                 count += 1
             
         else:
             beta1 = beta0
-            res = self.Y-self.X.dot(beta1)
+            res = self.Y-X.dot(beta1)
             count = 0
+            rownorm = np.sum(X**2, axis=1)**0.5
 
             while count < T:
-                grad1 = eta*self.X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(np.sum(self.X**2, axis=1)**0.5))/self.n
-                noise = rgt.multivariate_normal(np.zeros(self.d), np.identity(self.d))
-                diff = grad1 + 2*eta*T*np.sqrt(2*np.log(2*T/delta))*gamma*tau*noise/(epsilon*self.n)
+                grad1 = X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(rownorm))/self.n
+                noise = rgt.multivariate_normal(np.zeros(X.shape[1]), np.identity(X.shape[1]))
+                diff = eta*grad1 + 2*eta*T*np.sqrt(2*np.log(2*T/delta))*gamma*tau*noise/(epsilon*self.n)
                 beta1 += diff
-                res = self.Y-self.X.dot(beta1)
-                beta_seq[:, count+1] = beta1
+                res = self.Y-X.dot(beta1)
+                beta_seq[:, count+1] = np.copy(beta1)
                 count += 1
+
+        if standardize and adjust:
+            beta0[self.itcp:] = beta0[self.itcp:]/self.sdX
+            beta_seq[self.itcp:,] = beta_seq[self.itcp:,]/self.sdX[:,None]
+            if self.itcp: 
+                beta0[0] -= self.mX.dot(beta0[1:])
+                beta_seq[0,:] -= self.mX.dot(beta_seq[1:,])
 
 
         return beta1, [res, tau, count], beta_seq
     
+    def noisy_huber_reg_lowdim_dev(self, epsilon, T, delta, eta, beta0 = None, gamma=1, tau=None, 
+                               standardize=True, adjust=True):
+
+        if beta0 is None:
+            beta0 = np.zeros(self.d+int(self.itcp))
+
+        if T is None:
+            T = int((np.log(self.n)))
+        if standardize: X = self.X1
+        else: X= self.X
+        beta_seq = np.zeros([X.shape[1], T+1])
+        beta_seq[:,0] = beta0
+
+        if tau == None:
+            rhs = (1/self.n)*(self.d+np.log(self.n*self.d))
+            tau = 1.345*np.median(np.abs(self.Y-np.median(self.Y)))
+            #tau = self.robust_tau()
+            beta1 = beta0
+            res = self.Y-X.dot(beta1)
+            count = 0
+            rownorm = np.sum(X**2, axis=1)**0.5
+
+            while count < T:
+                grad1 = X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(rownorm))/self.n
+                noise = rgt.multivariate_normal(np.zeros(X.shape[1]), np.identity(X.shape[1]))
+                diff = eta*grad1 + 2*eta*T*np.sqrt(2*np.log(2*T/delta))*gamma*tau*noise/(epsilon*self.n)
+                beta1 += diff
+                res = self.Y-X.dot(beta1)
+                resSq = res*res
+                tau = self.rootf1(resSq=resSq, n=self.n, rhs=rhs, low=np.min(resSq), up=np.sum(resSq))
+                beta_seq[:, count+1] = np.copy(beta1)
+                count += 1
+            
+        else:
+            beta1 = beta0
+            res = self.Y-X.dot(beta1)
+            count = 0
+            rownorm = np.sum(X**2, axis=1)**0.5
+
+            while count < T:
+                grad1 = X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(rownorm))/self.n
+                noise = rgt.multivariate_normal(np.zeros(X.shape[1]), np.identity(X.shape[1]))
+                diff = eta*grad1 + 2*eta*T*np.sqrt(2*np.log(2*T/delta))*gamma*tau*noise/(epsilon*self.n)
+                beta1 += diff
+                res = self.Y-X.dot(beta1)
+                beta_seq[:, count+1] = np.copy(beta1)
+                count += 1
+
+        if standardize and adjust:
+            beta0[self.itcp:] = beta0[self.itcp:]/self.sdX
+            beta_seq[self.itcp:,] = beta_seq[self.itcp:,]/self.sdX[:,None]
+            if self.itcp: 
+                beta0[0] -= self.mX.dot(beta0[1:])
+                beta_seq[0,:] -= self.mX.dot(beta_seq[1:,])
+
+
+        return beta1, [res, tau, count], beta_seq
 
     def noisy_huber_reg_highdim(self, beta0, epsilon, T, delta, eta, gamma=1, tau=None):
 
@@ -533,7 +640,7 @@ class huberReg():
 
         if tau == None:
             
-            tau = self.robust_tau(dim='low')
+            tau = 1.345*np.median(np.abs(self.Y-np.median(self.Y)))
             beta1 = beta0
             res = self.Y-self.X.dot(beta1)
             count = 0
