@@ -438,6 +438,27 @@ class huberReg():
         # Calculate the score function
         score = np.where(np.abs(x) <= tau, x, tau * np.sign(x))
         return score
+    
+    def noisyht(self, v, s, epsilon, delta, lambda_scale):
+        d = len(v)
+        S =set()
+        for _ in range(s):
+            w= np.random.laplace(0, lambda_scale*2*np.sqrt(2*s*np.log(1/delta))/epsilon, (d,))
+            candidates = [(abs(v[j]) + w[j], j) for j in range(d) if j not in S]
+            _, j_max = max(candidates, key=lambda x: x[0])
+            S.add(j_max)
+
+        v_S = np.zeros(d)
+        for j in S:
+            v_S[j] = v[j]
+        noise = np.random.laplace(0, lambda_scale*2*np.sqrt(2*s*np.log(1/delta))/epsilon, (d,))
+        for j in S:
+            v_S[j] += noise[j]
+
+        return v_S
+
+        
+
 
     def f1(self, x, resSq, n, rhs):
         """
@@ -627,16 +648,18 @@ class huberReg():
 
         return beta1, [res, tau, count], beta_seq
 
-    def noisy_huber_reg_highdim(self, beta0, epsilon, T, delta, eta, gamma=1, tau=None):
+    def noisy_huber_reg_highdim(self, beta0, epsilon, T, delta, eta, s, gamma=1, tau=None, standardize=True, adjust=True):
 
         if beta0 is None:
-            beta0 = np.zeros(self.d)
-
+            beta0 = np.zeros(self.d+int(self.itcp))
         if T == None:
             T = int((np.log(self.n)))
 
-        beta_seq = np.zeros([self.d, T+1])
+        if standardize: X = self.X1
+        else: X= self.X
+        beta_seq = np.zeros([X.shape[1], T+1])
         beta_seq[:,0] = beta0
+
 
         if tau == None:
             
@@ -646,29 +669,23 @@ class huberReg():
             count = 0
 
             while count < T:
-                grad1 = self.X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(np.max(np.abs(self.X), axis=1)))/self.n
-                noise = rgt.multivariate_normal(np.zeros(self.d), np.identity(self.d))
-                diff = eta*grad1 + 2*eta*T*np.sqrt(2*np.log(2*T/delta))*gamma*tau*noise/(epsilon*self.n)
+                grad1 = X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(np.max(np.abs(X), axis=1)))/self.n
+                diff = eta*grad1 
                 beta1 += diff
-                res = self.Y-self.X.dot(beta1)
+                beta1 =  self.noisyht(beta1, s=s, epsilon=epsilon/T, delta=delta/T, lambda_scale=2*(eta/self.n)*gamma*tau)
+                res = self.Y-X.dot(beta1)
                 beta_seq[:, count+1] = beta1
                 count += 1
+
+        if standardize and adjust:
+            beta0[self.itcp:] = beta0[self.itcp:]/self.sdX
+            beta_seq[self.itcp:,] = beta_seq[self.itcp:,]/self.sdX[:,None]
+            if self.itcp: 
+                beta0[0] -= self.mX.dot(beta0[1:])
+                beta_seq[0,:] -= self.mX.dot(beta_seq[1:,])
             
-        else:
-            beta1 = beta0
-            res = self.Y-self.X.dot(beta1)
-            count = 0
+ 
 
-            while count < T:
-                grad1 = eta*self.X.T.dot(self.huber_loss_score_function(res, tau=tau)*self.robust_reg_weight_low(np.sum(self.X**2, axis=1)**0.5))/self.n
-                noise = rgt.multivariate_normal(np.zeros(self.d), np.identity(self.d))
-                diff = grad1 + 2*eta*T*np.sqrt(2*np.log(2*T/delta))*gamma*tau*noise/(epsilon*self.n)
-                beta1 += diff
-                res = self.Y-self.X.dot(beta1)
-                beta_seq[:, count+1] = beta1
-                count += 1
-
-
-        return beta1, [res, tau, count], beta_seq
+        return beta_seq[-1], [res, tau, count], beta_seq
 
         
