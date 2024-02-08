@@ -687,5 +687,40 @@ class huberReg():
  
 
         return beta_seq[:,-1], [res, tau, count], beta_seq
+    
+    def noisy_ls_highdim(self, beta0, epsilon, T, delta, eta, s, standardize=True, adjust=True):
+
+        if beta0 is None:
+            beta0 = np.zeros(self.d+int(self.itcp))
+        if T == None:
+            T = int((np.log(self.n)))
+
+        if standardize: X = self.X1
+        else: X= self.X
+        beta_seq = np.zeros([X.shape[1], T+1])
+        beta_seq[:,0] = beta0
+        res = self.Y-X.dot(beta0)
+        count = 0
+        beta1 = beta0
+
+        while count < T:
+            grad1 = X.T.dot(res)/self.n
+            diff = eta*grad1 
+            beta1 += diff
+            beta1 =  self.noisyht(beta1, s=s, epsilon=epsilon/T, delta=delta/T, lambda_scale=4*(eta/self.n)*np.sqrt(2*np.log(self.n)/s))  
+            res = self.Y-X.dot(beta1)              
+            beta_seq[:, count+1] = beta1
+            count += 1
+
+        if standardize and adjust:
+            beta0[self.itcp:] = beta0[self.itcp:]/self.sdX
+            beta_seq[self.itcp:,] = beta_seq[self.itcp:,]/self.sdX[:,None]
+            if self.itcp: 
+                beta0[0] -= self.mX.dot(beta0[1:])
+                beta_seq[0,:] -= self.mX.dot(beta_seq[1:,])
+            
+ 
+
+        return beta_seq[:,-1], res, beta_seq
 
         
