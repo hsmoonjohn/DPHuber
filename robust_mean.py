@@ -443,7 +443,7 @@ class huberReg():
         d = len(v)
         S =set()
         for _ in range(s):
-            w= np.random.laplace(0, lambda_scale*2*np.sqrt(2*s*np.log(1/delta))/epsilon, (d,))
+            w= np.random.laplace(0, lambda_scale*2*np.sqrt(3*s*np.log(1/delta))/epsilon, (d,))
             candidates = [(abs(v[j]) + w[j], j) for j in range(d) if j not in S]
             _, j_max = max(candidates, key=lambda x: x[0])
             S.add(j_max)
@@ -451,7 +451,7 @@ class huberReg():
         v_S = np.zeros(d)
         for j in S:
             v_S[j] = v[j]
-        noise = np.random.laplace(0, lambda_scale*2*np.sqrt(2*s*np.log(1/delta))/epsilon, (d,))
+        noise = np.random.laplace(0, lambda_scale*2*np.sqrt(3*s*np.log(1/delta))/epsilon, (d,))
         for j in S:
             v_S[j] += noise[j]
 
@@ -686,6 +686,6 @@ class huberReg():
             
  
 
-        return beta_seq[-1], [res, tau, count], beta_seq
+        return beta_seq[:,-1], [res, tau, count], beta_seq
 
         
