@@ -33,44 +33,6 @@ class huberReg():
         self.Y = Y
         self.tau = (self.n/np.log(self.n))**0.5
 
-    def stability(self, epsilon = 0.5, delta = None, K = None):
-        '''
-        Return noisy estimate of $\EE\|X - \mu\|_2^2$.
-        '''
-        if K == None:
-            K = math.floor(np.sqrt(self.n)/2)
-
-        if delta == None :
-            delta = norm.cdf(-1 + epsilon/2) - np.exp(epsilon)*norm.cdf(-1 - epsilon/2)
-
-        distances = [(LA.norm(self.X[2*i,:] - self.X[2*i + 1])**2)/2 for i in range(math.floor(self.n/2) - 1)]
-        partition_size = len(distances) // K
-        partitions = [distances[i:i+partition_size] for i in range(0, len(distances), partition_size)]
-        medians = [np.median(partition) for partition in partitions]
-
-        smallest_median = min(medians)
-        largest_median = max(medians)
-
-        smallest_bin = math.floor(np.log2(smallest_median))
-        largest_bin = math.floor(np.log2(largest_median))
-
-        count = np.zeros(largest_bin - smallest_bin + 1)
-
-        for median in medians :
-            bin_exponent = math.floor(np.log2(median))
-            count[bin_exponent - smallest_bin] += 1
-
-        prob = count/len(medians)
-        t = 2*np.log(2/delta)/(epsilon*K) + 1/K
-
-        for i in range(len(prob)):
-            if prob[i] > 0:
-                prob[i] += rgt.laplace(0, 2/(epsilon*K))
-                if prob[i] < t:
-                    prob[i] = 0
-
-        return 2**(smallest_bin + np.argmax(prob))
-
 
     def robust_weight(self, x, method="Huber"):
         if method == "Huber":
@@ -110,9 +72,6 @@ class huberReg():
             v_S[j] += noise[j]
 
         return v_S
-
-        
-
 
     def f1(self, x, resSq, n, rhs):
         """
@@ -377,4 +336,49 @@ class huberReg():
 
         return beta_seq[:,-1], res, beta_seq
 
+    def ordhuber(self, beta0, method='BFGS'):
+        X = self.X
         
+        def huber_loss(params, X, y, tau):
+            predictions = np.dot(X, params)
+            residuals = y - predictions
+            loss = np.where(np.abs(residuals) <= tau,0.5 * residuals**2, tau * (np.abs(residuals) - 0.5 * tau))
+            return np.sum(loss) / len(y)
+        
+        initial_params = beta0
+        tau = 1.345*np.median(np.abs(self.Y-np.median(self.Y)))
+
+        result = minimize(huber_loss, initial_params, args=(X,self.Y, tau), method=method)
+
+        return result.x
+
+    def huber_lasso(self, lambda_=None, tau=None, tol=1e-6):
+        X=self.X
+        #X = np.concatenate([np.ones((self.n,1)), X], axis=1)
+
+        if tau == None:  
+            tau = 1.345*np.median(np.abs(self.Y-np.median(self.Y)))
+
+        if lambda_ == None:
+            lambda_ = np.sqrt(np.log(self.d)/self.n)*tau
+
+
+        def huber_loss(residuals, tau):
+            return np.where(np.abs(residuals) <= tau, 0.5 * residuals**2, tau * (np.abs(residuals) - 0.5 * tau))
+        
+        def huber_lasso_objective(beta, X, y, tau, lambda_):
+
+            residuals = y - np.dot(X, beta) 
+            huber_loss_value = huber_loss(residuals, tau).sum()
+            lasso_penalty = lambda_ * np.sum(np.abs(beta))  # Excluding the intercept from the L1 penalty
+            
+            return huber_loss_value + lasso_penalty
+        
+        n_features = X.shape[1]
+        initial_beta = np.zeros(n_features)  # Including intercept
+        result = minimize(huber_lasso_objective, initial_beta, args=(X, self.Y, tau, lambda_), method='L-BFGS-B', tol=tol, options={'disp': False})
+
+        return result.x
+        
+
+
