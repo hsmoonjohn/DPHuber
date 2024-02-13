@@ -8,7 +8,7 @@ import numpy.random as rgt
 import math
 from scipy.stats import norm
 from scipy.optimize import minimize
-
+from sklearn import linear_model
 
 class huberReg():
     
@@ -32,7 +32,13 @@ class huberReg():
             self.X, self.X1 = X, X/self.sdX
         self.Y = Y
         self.tau = (self.n/np.log(self.n))**0.5
-
+    
+    def huber_loss(self, residuals, tau):
+            return np.where(np.abs(residuals) <= tau, 0.5 * residuals**2, tau * (np.abs(residuals) - 0.5 * tau))
+    
+    def soft_thresh(self, x, c):
+        tmp = abs(x) - c
+        return np.sign(x) * np.where(tmp <= 0, 0, tmp)
 
     def robust_weight(self, x, method="Huber"):
         if method == "Huber":
@@ -379,6 +385,69 @@ class huberReg():
         result = minimize(huber_lasso_objective, initial_beta, args=(X, self.Y, tau, lambda_), method='L-BFGS-B', tol=tol, options={'disp': False})
 
         return result.x
+    
+    def l1huber(self, Lambda=np.array([]), tau=None, beta0=None, res=np.array([]), standardize=True,
+                adjust=True, phi=0.1, tol=1e-5, max_iter=1e3, gamma=1.25):
+        
+        if standardize:
+            X = self.X1
+        else:
+            X = self.X
+
+        if not np.array(Lambda).any():
+            lambda_max = np.max(np.abs(self.Y.dot(X)))/self.n
+            lambda_min = 0.01 * lambda_max
+            Lambda =  math.exp(0.7 * math.log(lambda_max) + 0.3 * math.log(lambda_min))
+
+        if tau == None:
+            clf = linear_model.Lasso(alpha=Lambda)
+            clf.fit(X, self.Y)
+            res0 = self.Y - clf.predict(X)  
+            tau = 1.345*np.median(np.abs(res0-np.median(res0)))
+
+        r0 = 1
+        count = 0
+        if beta0 is None:
+            beta0 = clf.coef_
+
+        res = self.Y-X.dot(beta0)
+        phi0 = phi
+
+        while (r0>tol) and count < max_iter:
+
+            grad0 = X.T.dot(self.huber_loss_score_function(-res, tau=tau))/self.n
+            loss_eval0 = np.mean(self.huber_loss(residuals=res, tau=tau))
+            beta1 = beta0 -grad0/phi
+            beta1[self.itcp:]= self.soft_thresh(beta1[self.itcp:], Lambda/phi)
+            diff_beta = beta1 - beta0
+            #r0 = diff_beta.dot(diff_beta)
+            r0 = max(np.abs(diff_beta))
+            res = self.Y-X.dot(beta1)
+            loss_proxy = loss_eval0 + diff_beta.dot(grad0) + 0.5 * phi * r0
+            loss_eval1 = np.mean(self.huber_loss(residuals=res, tau=tau))
+
+            while loss_proxy < loss_eval1:
+                phi *=  gamma
+                beta1 = beta0 -grad0/phi
+                beta1[self.itcp:]= self.soft_thresh(beta1[self.itcp:], Lambda/phi)
+                diff_beta = beta1 - beta0
+                #r0 = diff_beta.dot(diff_beta)
+                r0 = max(np.abs(diff_beta))
+                res = self.Y-X.dot(beta1)
+                loss_proxy = loss_eval0 + diff_beta.dot(grad0) + 0.5 * phi * r0
+                loss_eval1 = np.mean(self.huber_loss(residuals=res, tau=tau))
+
+            beta0 = beta1
+            phi = max(phi0, phi/gamma)
+            count += 1
+
+        if standardize and adjust:
+            beta1[self.itcp:] = beta1[self.itcp:] / self.sdX
+            if self.itcp: beta1[0] -= self.mX.dot(beta1[1:])
+
+        return {'beta': beta1, 'res': res, 'niter': count, 'lambda': Lambda, 'tau':tau}
+    
+   
         
 
 
