@@ -420,8 +420,8 @@ class huberReg():
             beta1 = beta0 -grad0/phi
             beta1[self.itcp:]= self.soft_thresh(beta1[self.itcp:], Lambda/phi)
             diff_beta = beta1 - beta0
-            #r0 = diff_beta.dot(diff_beta)
-            r0 = max(np.abs(diff_beta))
+            r0 = diff_beta.dot(diff_beta)
+            #r0 = max(np.abs(diff_beta))
             res = self.Y-X.dot(beta1)
             loss_proxy = loss_eval0 + diff_beta.dot(grad0) + 0.5 * phi * r0
             loss_eval1 = np.mean(self.huber_loss(residuals=res, tau=tau))
@@ -431,8 +431,8 @@ class huberReg():
                 beta1 = beta0 -grad0/phi
                 beta1[self.itcp:]= self.soft_thresh(beta1[self.itcp:], Lambda/phi)
                 diff_beta = beta1 - beta0
-                #r0 = diff_beta.dot(diff_beta)
-                r0 = max(np.abs(diff_beta))
+                r0 = diff_beta.dot(diff_beta)
+                #r0 = max(np.abs(diff_beta))
                 res = self.Y-X.dot(beta1)
                 loss_proxy = loss_eval0 + diff_beta.dot(grad0) + 0.5 * phi * r0
                 loss_eval1 = np.mean(self.huber_loss(residuals=res, tau=tau))
